@@ -7,6 +7,9 @@
 #include <arpa/inet.h>
 
 void getDomainAndPort(char *url, char **domain, char **port, char **path) {
+    char *inicio = strstr(url, "://");
+    if(inicio) url = inicio + 3;
+
   char *barra = strchr(url, '/');
   if(barra) {
     *barra = '\0';
@@ -76,8 +79,8 @@ int main(int argc, char *argv[]) {
   printf("Conexão bem sucedida!\n");
   char request[1000];
   snprintf(request, sizeof(request), 
-    "GET /%s HTTP/1.1\r\nHost: %s:%s\r\nConnection: close\r\n",
-    (path == NULL) ? "" : path, domain, port
+    "GET /%s HTTP/1.1\r\nHost: %s%s\r\nConnection: close\r\n\r\n",
+    (path == NULL) ? "" : path, domain, (strcmp(port, "80") == 0 ? "" : strcat(":",port))
   );
   send(socketFD, request, strlen(request), 0);
   char buffer[8192];
@@ -85,7 +88,6 @@ int main(int argc, char *argv[]) {
   int header = 1;
   FILE *f = NULL;
   bytes = recv(socketFD, buffer, sizeof(buffer), 0);
-  printf("%d\n", bytes);
   while(bytes > 0) {
     if(header) {
       buffer[bytes] = '\0';
