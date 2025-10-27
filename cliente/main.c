@@ -5,6 +5,7 @@
 #include<sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <ctype.h>
 
 void getDomainAndPort(char *url, char **domain, char **port, char **path) {
   char *inicio = strstr(url, "://");
@@ -25,13 +26,13 @@ void getDomainAndPort(char *url, char **domain, char **port, char **path) {
 void handleDomainErrors(int error) {
   switch (error){
   case EAI_AGAIN:
-    printf("Não foi possível encontrar o domínio no momento, tente novamente mais tarde.");
+    printf("Não foi possível encontrar o domínio no momento, tente novamente mais tarde.\n");
     break;
   case EAI_FAIL:
-    printf("Ocorreu uma falha ao tentar encontrar este domínio.");
+    printf("Ocorreu uma falha ao tentar encontrar este domínio.\n");
     break;
   default:
-    printf("ERROR: %s", gai_strerror(error));
+    printf("ERROR: %s\n", gai_strerror(error));
     break;
   }
 }
@@ -86,17 +87,38 @@ void handleHTTPStatus(int status) {
 }
 
 char *getFilenameFromPath(const char *path) {
-   if (path == NULL || strlen(path) == 0) return strdup("index.html");
-   const char *barra = strrchr(path, '/');
-   if (barra && *(barra + 1) != '\0')
-    return strdup(barra + 1);
-   else
+  if (path == NULL || strlen(path) == 0) {
     return strdup("index.html");
+  }
+  const char *barra = strrchr(path, '/');
+  if (barra && *(barra + 1) != '\0') {
+    return strdup(barra + 1);
+  }
+    return strdup(path);
+}
+
+void url_encode(char *dest, const char *src, size_t dest_size) {
+  const char *hex = "0123456789ABCDEF";
+  size_t i = 0;
+  while (*src && i + 3 < dest_size) {
+    unsigned char c = (unsigned char)*src;
+    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      dest[i++] = c;
+    } else {
+      if (i + 3 >= dest_size)
+          break;
+      dest[i++] = '%';
+      dest[i++] = hex[c >> 4];
+      dest[i++] = hex[c & 15];
+    }
+    src++;
+  }
+  dest[i] = '\0';
 }
 
 int main(int argc, char *argv[]) {
   if(argc < 2) {
-    printf("Parâmetros incorretos, execute: ./client www.site.com\n");
+    printf("Parâmetros incorretos, execute: ./client http://www.site.com\n");
     return 1;
   }
   char *domain = NULL, *port = NULL, *path = NULL;
@@ -137,50 +159,61 @@ int main(int argc, char *argv[]) {
     printf("Não foi possível conectar ao site.\n");
     return 1;
   }
-
   char request[1000];
+  char reqPort[10] = "", encodedPath[500];
+  if(strcmp(port, "80") != 0) {
+    snprintf(reqPort, sizeof(reqPort), ":%s", port);
+  }
+  if(path == NULL) {
+    path = "";
+  }
+  url_encode(encodedPath, path, sizeof(encodedPath));
+  printf("%s %s\n", path, encodedPath);
   snprintf(request, sizeof(request), 
     "GET /%s HTTP/1.1\r\nHost: %s%s\r\nConnection: close\r\n\r\n",
-    (path == NULL) ? "" : path, domain, (strcmp(port, "80") == 0 ? "" : strcat(":",port))
+    encodedPath, domain, reqPort
   );
+
   send(socketFD, request, strlen(request), 0);
-  char buffer[8192];
-  int bytes;
+  char buffer[8000];
+  char headerBuffer[16000] = {0};
+  size_t headerLen = 0;
   int header = 1;
+  int httpStatus = 0;
   FILE *f = NULL;
   char *filename = getFilenameFromPath(path);
-  int httpStatus = 0;
-  bytes = recv(socketFD, buffer, sizeof(buffer), 0);
-  sscanf(buffer, "HTTP/%*s %d", &httpStatus);
-  while(bytes > 0) {
-    if(header) {
-      buffer[bytes] = '\0';
-      char *body = strstr(buffer, "\r\n\r\n");
-      if(body) {
+  ssize_t bytes;
+  while ((bytes = recv(socketFD, buffer, sizeof(buffer), 0)) > 0) {
+    if (header) {
+      if (headerLen + bytes < sizeof(headerBuffer)) {
+        memcpy(headerBuffer + headerLen, buffer, bytes);
+        headerLen += bytes;
+        headerBuffer[headerLen] = '\0';
+      }
+      char *body = strstr(headerBuffer, "\r\n\r\n");
+      if (body) {
         header = 0;
         body += 4;
-        size_t tamanhoDoHeader = body - buffer;
-        size_t tamanhoDoBody = bytes - tamanhoDoHeader;
-        if(tamanhoDoBody > 0) {
-          f = fopen(filename, "wb");
-          if(!f) {
-            printf("Erro ao gerar o arquivo.\n");
-            free(url);
-            close(socketFD);
-            return 1;
-          }
+        size_t headerSize = body - headerBuffer;
+        size_t bodySize = headerLen - headerSize;
+        sscanf(headerBuffer, "HTTP/%*s %d", &httpStatus);
+        f = fopen(filename, "wb");
+        if (!f) {
+          perror("Erro ao criar arquivo");
+          break;
         }
-        fwrite(buffer + tamanhoDoHeader, 1, tamanhoDoBody, f);
+        fwrite(body, 1, bodySize, f);
       }
     } else {
       fwrite(buffer, 1, bytes, f);
     }
-    bytes = recv(socketFD, buffer, sizeof(buffer), 0);
   }
   handleHTTPStatus(httpStatus);
   if(f) {
     printf("Arquivo %s foi salvo.\n", filename);
     fclose(f);
+  } else {
+    printf("Infelizmente não foi possível baixar o recurso.\n");
   }
   free(url);
   free(filename);
