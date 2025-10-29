@@ -97,23 +97,22 @@ char *getFilenameFromPath(const char *path) {
     return strdup(path);
 }
 
-void url_encode(char *dest, const char *src, size_t dest_size) {
+void encodeURL(char *dest, const char *src, int srcLength) {
   const char *hex = "0123456789ABCDEF";
-  size_t i = 0;
-  while (*src && i + 3 < dest_size) {
-    unsigned char c = (unsigned char)*src;
+  int j = 0;
+  for(int i = 0; i < srcLength; i++) {
+    unsigned char c = (unsigned char)src[i];
     if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-      dest[i++] = c;
+      dest[j] = c;
+      j++;
     } else {
-      if (i + 3 >= dest_size)
-          break;
-      dest[i++] = '%';
-      dest[i++] = hex[c >> 4];
-      dest[i++] = hex[c & 15];
+      dest[j] = '%';
+      dest[j+1] = hex[c >> 4];
+      dest[j+2] = hex[c & 15];
+      j += 3;
     }
-    src++;
   }
-  dest[i] = '\0';
+  dest[j] = '\0';
 }
 
 int main(int argc, char *argv[]) {
@@ -167,16 +166,15 @@ int main(int argc, char *argv[]) {
   if(path == NULL) {
     path = "";
   }
-  url_encode(encodedPath, path, sizeof(encodedPath));
-  printf("%s %s\n", path, encodedPath);
+  encodeURL(encodedPath, path, strlen(path));
   snprintf(request, sizeof(request), 
     "GET /%s HTTP/1.1\r\nHost: %s%s\r\nConnection: close\r\n\r\n",
     encodedPath, domain, reqPort
   );
 
   send(socketFD, request, strlen(request), 0);
-  char buffer[8000];
-  char headerBuffer[16000] = {0};
+  char buffer[8192];
+  char headerBuffer[8192] = {0};
   size_t headerLen = 0;
   int header = 1;
   int httpStatus = 0;
