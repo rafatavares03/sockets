@@ -131,7 +131,7 @@ void *handle_client(void *arg) {
       return NULL;
     }
     char html[16384];
-    char css[] = "body{margin:10px;background-color:light-grey;font-family:Arial;}";
+    char css[] = "body{margin:10px;background-color:#ceffc0;font-family:Arial;}";
     snprintf(html, sizeof(html),
       "<html><head><title>Diretório</title><meta charset=\"utf-8\"><style> %s</style></head>"
       "<body><h2>Arquivos do diretório:</h2><ul>",
